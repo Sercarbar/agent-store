@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install base dependencies if a requirements.txt is present in the agent
+COPY . .
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+
+# The agent reads /app/input/input.json and prints JSON to stdout
+CMD ["python", "agent.py"]

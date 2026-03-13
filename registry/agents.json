@@ -1,0 +1,6 @@
+{
+  "agente_test": {
+    "url": "https://github.com/Sercarbar/agente-prueba-repo.git",
+    "description": "Agente de prueba para validar el orquestador"
+  }
+}
