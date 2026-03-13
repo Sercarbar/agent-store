@@ -1,6 +1,15 @@
 {
   "agente_test": {
     "url": "https://github.com/Sercarbar/agente-prueba-repo.git",
-    "description": "Agente de prueba para validar el orquestador"
+    "description": "Agente de prueba local",
+    "entrypoint_map": {}
+  },
+  "investigador_noticias": {
+    "url": "https://github.com/joaomdmoura/crewAI-examples.git",
+    "description": "Agente real de investigación de mercado",
+    "entrypoint_map": {
+      "topic": "tema",
+      "language": "idioma"
+    }
   }
 }

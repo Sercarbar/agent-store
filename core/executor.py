@@ -10,6 +10,8 @@ from docker.errors import BuildError, ContainerError, ImageNotFound
 
 from core.config import DOWNLOADS_DIR, DOCKERFILE_TEMPLATE, TMP_DIR
 
+_ENTRYPOINT_TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "entrypoint.py.template"
+
 
 class AgentExecutor:
     """Builds a Docker image from a downloaded agent and runs it with the provided input data."""
@@ -23,15 +25,27 @@ class AgentExecutor:
                 "Make sure Docker Desktop is running."
             ) from exc
 
-    def run(self, agent_name: str, input_data: dict[str, Any]) -> dict[str, Any]:
+    def run(
+        self,
+        agent_name: str,
+        input_data: dict[str, Any],
+        entrypoint_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Build the agent image and run a container with the given input data.
 
         Steps:
-        1. Copy Dockerfile.template into the agent directory.
-        2. Build a Docker image tagged with the agent name.
-        3. Write input_data to a temporary input.json file.
-        4. Run the container with the tmp folder mounted (read-only).
-        5. Capture stdout, parse it as JSON and return as a dict.
+        1. Always (re)write the Dockerfile from the shared template.
+        2. Generate entrypoint.py using the provided field mapping.
+        3. Build a Docker image tagged with the agent name.
+        4. Write input_data to a temporary input.json file.
+        5. Run the container with the tmp folder mounted (read-only).
+        6. Capture stdout, parse it as JSON and return as a dict.
+
+        entrypoint_map: optional dict that maps input.json keys to the
+            parameter names the real agent script expects, e.g.
+            {"topic": "tema", "lang": "idioma"}.
+            Keys are the names used inside input.json; values are the
+            names the agent module accepts.
 
         The container is automatically removed after execution (auto_remove=True).
         Raises RuntimeError on build or run failure.
@@ -43,7 +57,9 @@ class AgentExecutor:
                 "Run AgentManager.clone() first."
             )
 
-        self._copy_dockerfile(agent_dir)
+        self._check_requirements(agent_dir)
+        self._write_dockerfile(agent_dir)
+        self._generate_entrypoint(agent_dir, entrypoint_map or {})
         image_tag = self._build_image(agent_name, agent_dir)
         run_dir = self._prepare_run_dir(input_data)
 
@@ -56,18 +72,48 @@ class AgentExecutor:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _copy_dockerfile(self, agent_dir: Path) -> None:
-        """Copy the shared Dockerfile template into the agent directory."""
-        dest = agent_dir / "Dockerfile"
-        if dest.exists():
-            print(f"[AgentExecutor] Dockerfile already present in {agent_dir} — using existing file.")
-            return
+    def _check_requirements(self, agent_dir: Path) -> None:
+        """Log whether the agent ships its own requirements.txt."""
+        req = agent_dir / "requirements.txt"
+        if req.exists():
+            print(f"[AgentExecutor] requirements.txt found — will be installed during Docker build.")
+        else:
+            print(f"[AgentExecutor] No requirements.txt found in {agent_dir} — skipping pip install.")
+
+    def _write_dockerfile(self, agent_dir: Path) -> None:
+        """Always (re)write the Dockerfile from the shared template.
+
+        Any Dockerfile that the cloned repo ships is intentionally replaced
+        so that every agent runs in a standardised, platform-controlled
+        environment.
+        """
         if not DOCKERFILE_TEMPLATE.exists():
             raise FileNotFoundError(
                 f"[AgentExecutor] Dockerfile template not found at {DOCKERFILE_TEMPLATE}."
             )
+        dest = agent_dir / "Dockerfile"
         shutil.copy(DOCKERFILE_TEMPLATE, dest)
-        print(f"[AgentExecutor] Copied Dockerfile template to {dest}.")
+        print(f"[AgentExecutor] Dockerfile written from template to {dest}.")
+
+    def _generate_entrypoint(self, agent_dir: Path, entrypoint_map: dict[str, str]) -> None:
+        """Generate entrypoint.py inside the agent directory.
+
+        Reads the entrypoint template and substitutes the mapping so the
+        generated script knows how to translate input.json fields into the
+        parameters the real agent expects.
+        """
+        if not _ENTRYPOINT_TEMPLATE.exists():
+            raise FileNotFoundError(
+                f"[AgentExecutor] Entrypoint template not found at {_ENTRYPOINT_TEMPLATE}."
+            )
+        template_source = _ENTRYPOINT_TEMPLATE.read_text(encoding="utf-8")
+        # Embed the mapping as a Python literal so the generated script is
+        # completely self-contained (no runtime dependency on the platform).
+        map_literal = json.dumps(entrypoint_map, ensure_ascii=False, indent=4)
+        generated = template_source.replace("__ENTRYPOINT_MAP__", map_literal)
+        dest = agent_dir / "entrypoint.py"
+        dest.write_text(generated, encoding="utf-8")
+        print(f"[AgentExecutor] entrypoint.py generated at {dest} (map={entrypoint_map}).")
 
     def _build_image(self, agent_name: str, agent_dir: Path) -> str:
         """Build a Docker image from the agent directory and return its tag."""

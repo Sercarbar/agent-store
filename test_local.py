@@ -24,7 +24,7 @@ def load_registry() -> dict:
         return json.load(fh)
 
 
-def pick_agent(registry: dict, requested: str | None) -> tuple[str, str]:
+def pick_agent(registry: dict, requested: str | None) -> tuple[str, str, dict]:
     if not registry:
         print("[test_local] The registry is empty. Add at least one agent to registry/agents.json.")
         sys.exit(1)
@@ -40,8 +40,13 @@ def pick_agent(registry: dict, requested: str | None) -> tuple[str, str]:
         print(f"[test_local] No agent specified — using the first one in the registry: '{name}'")
 
     entry = registry[name]
-    url = entry if isinstance(entry, str) else entry["url"]
-    return name, url
+    if isinstance(entry, str):
+        url = entry
+        entrypoint_map: dict = {}
+    else:
+        url = entry["url"]
+        entrypoint_map = entry.get("entrypoint_map", {})
+    return name, url, entrypoint_map
 
 
 def main() -> None:
@@ -62,9 +67,10 @@ def main() -> None:
     # 1. Load registry and resolve agent
     # ------------------------------------------------------------------
     registry = load_registry()
-    agent_name, agent_url = pick_agent(registry, args.agent)
+    agent_name, agent_url, entrypoint_map = pick_agent(registry, args.agent)
     print(f"\n[test_local] === Running agent: '{agent_name}' ===")
-    print(f"[test_local] Source: {agent_url}\n")
+    print(f"[test_local] Source: {agent_url}")
+    print(f"[test_local] Entrypoint map: {entrypoint_map}\n")
 
     # ------------------------------------------------------------------
     # 2. Parse input data
@@ -95,7 +101,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     executor = AgentExecutor()
     try:
-        result = executor.run(agent_name, input_data)
+        result = executor.run(agent_name, input_data, entrypoint_map=entrypoint_map)
     except (RuntimeError, FileNotFoundError) as exc:
         print(f"\n[test_local] ERROR during execution step:\n  {exc}")
         sys.exit(1)
